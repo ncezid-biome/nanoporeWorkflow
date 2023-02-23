@@ -85,11 +85,6 @@ if [ -f ${INDIR}/demux/nanoplot/*NanoPlot-report.html ]; then
   exit 0
 fi
 
-# Using Singularity container since it has NanoPlot 1.32.0. latest version available in module system is 1.28.0
-source /etc/profile.d/modules.sh
-module purge
-module load singularity/3.5.3
-
 # pull the 'protocol_group_id' key and value from a guppy_output file. Represents the runID (at least for Jenny and Katie's runs)
 # grep -m stops searching after first occurrence. cut to pull the value of the sample_id key
 runID=$(grep -m 1 'protocol_group_id' ${INDIR}/demux/sequencing_telemetry.js | cut -d '"' -f 4)

@@ -21,9 +21,6 @@ make_directory() {
 
 set -e
 
-source /etc/profile.d/modules.sh
-module purge
-
 # GPU nodes have 20 threads, but using all 20 would cause guppy to crash.
 # setting NSLOTS to 2 just incase the variable isn't set beforehand
 NSLOTS=${NSLOTS:=2}
@@ -67,9 +64,6 @@ else
     echo "Copying reads from $FAST5DIR to $tmpdir"
     cp -r $FAST5DIR $fast5tmp
 fi
-
-#### Basecalling using GPU ####
-module load guppy/4.4.2
 
 # moved this line below loading guppy module since a variable in /apps/x86_64/fast5/2.0.1/bin/activate does not get set
 set -u

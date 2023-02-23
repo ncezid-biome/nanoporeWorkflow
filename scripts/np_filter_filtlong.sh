@@ -30,9 +30,6 @@ make_directory() {
     fi
 }
 
-source /etc/profile.d/modules.sh
-module purge
-
 NSLOTS=${NSLOTS:=16}
 echo '$NSLOTS is set to:' $NSLOTS
 
@@ -87,11 +84,6 @@ zcat ${dir}all.fastq.gz | perl -lne '
   print length($_);
 ' | sort -rn | gzip -cf > ${LENGTHS};
 echo "Finished combining reads and counting read lengths."
-
-# load singularity 3.5.3 in case it isn't in your path by default
-source /etc/profile.d/modules.sh
-module purge
-module load singularity/3.5.3
 
 # run Filtlong
 # have to use /bin/bash -c here so that the pipe & pigz is run inside the container and not on host machine
