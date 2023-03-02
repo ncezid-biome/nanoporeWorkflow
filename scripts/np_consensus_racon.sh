@@ -51,12 +51,6 @@ if [[ -e ${dir}racon/ctg.consensus.iteration4.fasta ]]; then
   exit 0
 fi
 
-source /etc/profile.d/modules.sh
-module purge
-module load minimap2/2.17
-module load racon/1.3.1
-make_directory ${dir}racon
-
 # align long reads to draft assembly produced by flye/wtdbg2/etc
 if [[ -e ${dir}racon/alignment.paf ]]; then
   echo "Reads have already been aligned to draft assembly. Skipping..."

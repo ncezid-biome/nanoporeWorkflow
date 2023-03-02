@@ -42,11 +42,6 @@ if [[ -e ${dir}medaka/consensus.fasta ]]; then
   exit 0
 fi
 
-# load singularity since singularity 3.5.3 is in your path by default (as of 17 June 2020)
-source /etc/profile.d/modules.sh
-module purge
-module load singularity/3.5.3
-
 # print medaka version; run medaka 
 singularity exec --no-home -B $PWD:/data /apps/standalone/singularity/medaka/medaka.1.2.0.staphb.sif medaka --version
 
