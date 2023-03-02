@@ -77,14 +77,6 @@ echo '$LENGTHS set to:' $LENGTHS
 MINLENGTH=$(zcat "$LENGTHS" | sort -rn | perl -lane 'chomp; $minlength=$_; $cum+=$minlength; $cov=$cum/'$GENOMELENGTH'; last if($cov > '$LONGREADCOVERAGE'); END{print $minlength;}')
 echo "Min length for $LONGREADCOVERAGE coverage will be $MINLENGTH";
 
-# Using Singularity container since it has Flye 2.7 (latest as of June 2020)
-
-# load singularity since singularity 3.5 is in your PATH by default
-# TODO ? upgrade to new singularity 3.5 version ?
-source /etc/profile.d/modules.sh
-module purge
-module load singularity/3.5.3
-
 # Assemble.
 echo "Assembling with flye..."
 singularity exec --no-home -B ${dir}:/data /apps/standalone/singularity/flye/flye.2.7.staphb.simg \
