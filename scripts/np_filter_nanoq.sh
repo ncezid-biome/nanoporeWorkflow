@@ -64,6 +64,6 @@ fi
 
 thisDir=$(dirname $0)
 
-#Run nanoq - for now version is stuck at 0.8.6. 
-#TODO: Update with latest image if available.
-singularity exec -B $PWD:/data ${thisDir}/../singularity/nanoq.0.8.6.sif nanoq -i ${READS} -l ${MINLENGTH} -o ${OUTPUT} -vvv -H >> nanoq.log 2>&1
+#Run nanoq - for now version is stuck at 0.8.6
+singularity exec -B $PWD:/data docker://jimmyliu1326/nanoq nanoq --version
+singularity exec -B $PWD:/data docker://jimmyliu1326/nanoq nanoq -i ${READS} -l ${MINLENGTH} -o ${OUTPUT} -vvv -H >> nanoq.log 2>&1
