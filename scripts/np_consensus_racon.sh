@@ -1,83 +1,79 @@
 #!/bin/bash
-#$ -o racon.log
-#$ -e racon.err
-#$ -j y
-#$ -N racon
-#$ -pe smp 2-16
-#$ -V -cwd
-set -e
 
-#This function will check to make sure the directory doesn't already exist before trying to create it
-make_directory() {
-    if [ -e $1 ]; then
-        echo "Directory "$1" already exists"
-    else
-        mkdir $1
-        echo "Directory "$1" has been created"
-    fi
+#this program will run align long reads to draft assembly using minimap2
+
+#HELP function
+function HELP {
+echo ""
+echo "Usage:" $0
+echo "			-a path/to/assembly/			draft assembly in .fasta format"
+echo "          -r path/to/reads/				reads in .fastq format"
+echo "          -m mode							module vs container"
+echo ""
+echo "Example: $0 -a /path/to/draftassembly.fasta -r /path/to/longreads.fastq.gz -m container"
+echo ""
+exit 0
 }
 
-NSLOTS=${NSLOTS:=24}
-echo '$NSLOTS set to:' $NSLOTS
-
-INDIR=$1
-
-set -u
-
-if [ "$INDIR" == "" ]; then
-    echo "Usage: $0 barcode-dir/"
-    exit 1;
-fi;
-
-# Setup any debugging information
-date
-hostname
-
-# Setup tempdir
-tmpdir=$(mktemp -p . -d racon.XXXXXX)
-trap ' { echo "END - $(date)"; rm -rf $tmpdir; } ' EXIT
-echo "$0: temp dir is $tmpdir";
-
-dir=$INDIR
-echo '$dir is set to:' ${dir}
-BARCODE=$(basename ${dir})
-echo '$BARCODE is set to:' $BARCODE
-
-FASTQ="${dir}reads.minlen500.600Mb.fastq.gz"
-
-# check to see if assembly has been through consensus correction, skip if so
-if [[ -e ${dir}racon/ctg.consensus.iteration4.fasta ]]; then
-  echo "Assembly has already been polished 4 times with racon. Exiting...."
-  exit 0
-fi
-
-# align long reads to draft assembly produced by flye/wtdbg2/etc
-if [[ -e ${dir}racon/alignment.paf ]]; then
-  echo "Reads have already been aligned to draft assembly. Skipping..."
-else
-  echo "Aligning reads to draft assembly with minimap2...."
-  minimap2 -t ${NSLOTS} -x map-ont ${dir}*/assembly.fasta ${FASTQ} > ${dir}racon/alignment.paf
-fi
-
-# run Racon 4 times
-iteration=1
-# while loop to iterate through racon 4 times
-while [ $iteration -le 4 ]
-do  
-  echo '$iteration =' $iteration
-  echo "Running Racon to generate a consensus..."
-  # if on first iteration, run racon using draft assembly from flye/wtdbg2
-  if [[ $iteration == 1 ]]; then
-    racon -m 8 -x -6 -g -8 -w 500 -t ${NSLOTS} ${FASTQ} ${dir}racon/alignment.paf ${dir}*/assembly.fasta > ${dir}racon/ctg.consensus.iteration${iteration}.fasta
-  else 
-    # if on 2/3/4 iteration, run racon on assembly corrected by prev iteration of racon
-    prev_iteration=$((iteration-1))
-    echo '$prev_iteration =' $prev_iteration
-    # map reads back to consensus-corrected assembly      
-    minimap2 -t ${NSLOTS} -x map-ont ${dir}racon/ctg.consensus.iteration${prev_iteration}.fasta ${FASTQ} > ${dir}racon/alignment.iteration${iteration}.paf
-    # run racon again
-    racon -m 8 -x -6 -g -8 -w 500 -t ${NSLOTS} ${FASTQ} ${dir}racon/alignment.iteration${iteration}.paf ${dir}racon/ctg.consensus.iteration${prev_iteration}.fasta  > ${dir}racon/ctg.consensus.iteration${iteration}.fasta
-  fi
-  # add 1 to iteration counter
-  ((iteration++))
+###Take arguments
+#Run HELP if -h -? or invalid input
+#Set ASSEMBLY to -a
+#Set LONGREADS to -r
+while getopts ":ha:r:m:" option; do
+	case ${option} in
+		h)
+		HELP
+		;;
+		a)
+		export ASSEMBLY=${OPTARG}
+		;;
+		r)
+		export LONGREADS=${OPTARG}
+		;;
+		m)
+		export MODE=${OPTARG}
+		;;
+		\?)
+		echo "Invalid option: ${OPTARG}" 1>&2
+		HELP
+		;;
+	esac
 done
+
+#Check if all parameters are filled
+if [[ -z "${ASSEMBLY}" || -z "${LONGREADS}" || -z "${MODE}" ]]; then
+	echo ""
+	echo "All flags required."
+	HELP
+fi
+
+#Check if files exist and print out variables
+if [[ -e $ASSEMBLY || -e $LONGREADS ]]; then
+	echo ""
+	echo "$0"
+	echo "Draft assembly set to:" ${ASSEMBLY}
+	echo "Reads set to:" ${LONGREADS}
+	echo ""
+else
+	echo ""
+	echo "Could not validate files. Please check and try again."
+	HELP
+fi
+
+#run minimap2 version 2.24, latest version available from staphb on dockerhub
+echo "Aligning reads to draft assembly with minimap2..."
+singularity exec -B $PWD:/data docker://staphb/minimap2:2.24 minimap2 --version
+singularity exec -B $PWD:/data docker://staphb/minimap2:2.24 minimap2 -t 16 -x map-ont ${ASSEMBLY} ${LONGREADS} > alignment.paf
+
+#If mode is set to "container" run racon version 1.4.3, latest version available from staphb on dockerhub
+#If mode is set to "module" load and run racon/1.4.3 from scicomp module
+#NOTE: You should only set -m to module if appropriate for your environment and you are running into hardware/OS compatibility issues with containers
+echo "Running consensus calling with racon..."
+if [[ "$MODE" == "container" ]]; then
+	singularity exec -B $PWD:/data docker://staphb/racon:1.4.3 racon --version
+	singularity exec -B $PWD:/data docker://staphb/racon:1.4.3 racon -m 8 -x -6 -g -8 -w 500 -t 16 ${LONGREADS} alignment.paf ${ASSEMBLY} > ctg.consensus.fasta
+elif [[ "$MODE" == "module" ]]; then
+	module purge
+	module load racon/1.4.3
+	racon -m 8 -x -6 -g -8 -w 500 -t 16 ${LONGREADS} alignment.paf ${ASSEMBLY} > ctg.consensus.fasta
+fi
