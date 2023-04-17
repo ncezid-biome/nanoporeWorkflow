@@ -1,192 +1,257 @@
 # nanoporeWorkflow
 
-_note_ this is a fork to update the pipeline in 2023 at CDC.
+NOTE: This is a fork to update the pipeline in 2023 at CDC.
 
-Shell scripts and workflows for working with Nanopore data. Submits jobs to CDC's Aspen HPC using `qsub`. 
+Welcome to Schtappe, what is going to be a suite of Nextflow workflows created to address a variety of CDC-EDLB Nanopore sequencing bioinformatics needs. Although Schtappe is intended for CDC users, the portable nature of Nextflow should allow for external users to easily adapt these workflows to their specific environments and/or needs. To facilitate that, all of the processes use Singularity containers.
 
-:warning: Don't bother reading if you aren't working on CDC's servers :warning:
+As of 4/17/2023, the workflows currently available include:
 
-**There are 2 main workflows:**
-  * `run_basecall-w-gpu.sh` - Guppy GPU basecalling, demultiplexing, and trimming. Followed by NanoPlot for generating seq run stats and graphs.
-  * `workflow-after-gpu-basecalling.sh` - Assembly with Flye and polishing with Racon and Medaka
+ * Stylo - Nanopore assembly workflow from basecalled reads to polished assembly plus assembly QC, metrics, and plasmid replicon detection
+
+See [Future Plans](#future-plans) for information on updates to existing and in-development workflows.
 
 ## TOC
   * [Install](#install)
   * [Workflows](#workflows)
-    * [Guppy GPU basecalling, demultiplexing, and trimming](#guppy-gpu-basecalling-demultiplexing-trimming-and-nanoplot)
-    * [Assembly with Flye and polishing with Racon and Medaka](#assembly-with-flye-and-polishing-with-racon-and-medaka)
-  * [Contributing](#contributing)
+    * [Stylo](#stylo)
+      * [Overview](#overview)
+      * [Parameters](#parameters)
+      * [Processes](#processes)
+      * [Profiles](#profiles)
+      * [Usage](#usage)
+      * [Output](#output)
   * [Future Plans](#future-plans)
   * [Resources](#resources)
+  * [Etymology](#etymology)
+  * [Thanks](#thanks)
 
 ## Install
-Download the repository from the latest release (v0.5.0 is latest as of March 2021) and uncompress.
+Navigate to your home directory and git clone the repository.
 ```bash
-$ wget https://github.com/kapsakcj/nanoporeWorkflow/archive/v0.5.0.tar.gz 
-$ tar -xzf v0.5.0.tar.gz
- ```
-*Optional* - add the workflows to your $PATH (edit the PATH below to wherever you downloaded the repo). Refresh your environment by `source`'ing your `.bashrc` file.
-```bash
-# Be careful with this command - make sure the PATH is properly edited!
-$ echo 'export PATH=$PATH:/path/to/nanoporeWorkflow-0.5.0/workflows' >> ~/.bashrc
-$ source ~/.bashrc
+$ git clone https://github.com/ncezid-biome/nanoporeWorkflow
 ```
+You will need to install Nextflow if you don't already have it: https://www.nextflow.io/docs/latest/getstarted.html
+
+You will also need to install Singularity if you don't already have it: https://docs.sylabs.io/guides/3.0/user-guide/quick_start.html
+
+If you're working on CDC servers, run `module load nextflow/XX.XX.X` to load Nextflow, Singularity, and Java modules.
+
+As of 4/17/2023, this workflow was developed on Nextflow version 22.10.6.
 
 ## Workflows
 
-### Guppy GPU basecalling, demultiplexing, trimming, and NanoPlot
+### Stylo
 
-`run_basecall-w-gpu.sh` - Guppy GPU basecalling, demultiplexing, and adapter/barcode trimming. Followed by NanoPlot for generating seq run stats and graphs.
+#### Overview:
+* READFILTERING - Filters reads based on read-length using Nanoq
+* DOWNSAMPLE - Randomly downsamples read set based on organism genome size and desired coverage using Rasusa
+* ASSEMBLE - Generates long-read assembly using Flye
+* HYBRID - Generates hybrid assembly using Unicycler (alternative option to using Flye)
+* ROTATE - Changes start position of contigs using Circlator
+* POLISH - Creates consensus calls using Medaka
+* RENAME - Renames polished assembly for convenience
+* FORMATREADS - Preps reads to be run through staramr using Seqtk 
+* PLASMIDCHECK - Detects plasmid replicons in reads and assembly using Staramr
+* SOCRU - Does Socru (*shrug) 
+* ASSEMBLYQC - Generates assembly quality metrics using BUSCO
 
-#### Requirements
+![image](https://user-images.githubusercontent.com/112518496/232568302-f03f21ca-0918-402c-a3e5-2bd499e1a135.png)
 
-  * Must be logged into a server with the ability to run `qsub` for submitting jobs to Aspen:
-    * Aspen head node
-    * Aspen interactive node (run  `qlogin` from aspen head node)
-    * Monoliths 1-3 (cannot submit jobs from M4)
-  * Currently supported MinION data:
-    * R9.4.1 flowcell (FLO-MIN106)
-      * Rapid barcoding kit (RBK-004)
-      * Ligation sequencing kit (SQK-LSK109) + native barcodes 1-24 (NBD103/104/114)
-    * R10 flowcell
-      * Ligation sequencing kit (SQK-LSK109) + native barcodes 1-24 (NBD103/104/114)
-  *  Unsupported combos (want to add in the future!):
-      * R9.4.1 + rapid or ligation sequencing kit without barcoding (RAD-004)
-      * R10 + ligation without barcoding 
-      * R10.3 + ligation with & without barcoding
+#### Parameters:
+Parameters for each process can be changed in `stylo.config` under the first bracketed section `params`. Check out [Resources](#resources) for links to each process's main github page to learn more about process-specific parameters.
 
-#### This workflow does the following:
-  * Takes in 5 arguments (a double pipe `||` is the same as OR):
-    1. `-i path/to/fast5files/`      - the input directory containing raw fast5 files
-    2. `-o path/to/outputDirectory/` - an output directory
-    3. `-b y || yes || n || no`      - were barcodes used?
-    4. `-f r941 || r10`              - flowcell type used?
-    5. `-k rapid || ligation`         - sequencing kit used?
-  * copies fast5s from input directory to `/scicomp/scratch/$USER/guppy.gpu.XXXXXX`
-  * runs `guppy_basecaller` in high-accuracy mode on a GPU
-  * Demultiplexes using `guppy_basecaller` and additionally trims adapter and barcode sequences (using `--trim_barcodes ; --barcode_kits "EXP-NBD104 EXP-NBD114" or "SQK-RBK004"` options)
-  * Compresses the demultiplexed reads (`--compress_fastq` option)
-  * Copies demultiplexed, trimmed, compressed reads into subdirectories in `$OUTDIR/demux/barcodeXX`
-  * Runs `NanoPlot` to generate sequencing run stats on the entire run, as well as individual barcodes.
-
- #### USAGE:
-Pull up help/usage statement by running `run_basecall-w-gpu.sh` or `run_basecall-w-gpu.sh -h`
-```bash
-Usage: /path/to/nanoporeWorkflow-0.5.0/workflows/run_basecall-w-gpu.sh
-                 -i path/to/fast5files/        searches recursively for fast5 files
-                 -o path/to/outputDirectory/   output directory
-                 -b y || yes || n || no        barcodes used?
-                 -f r941 || r10                flowcell type used?
-                 -k rapid || ligation          sequencing kit used?
-
-example: /path/to/nanoporeWorkflow-0.5.0/workflows/run_basecall-w-gpu.sh -i fast5s/ -o output/ -b y -f r941 -k rapid
-
-# EXAMPLE OUTPUT (reduced for brevity)
-$OUTDIR
-├── demux
-│   ├── barcode01
-│   │   └── fastq_runid_fbc8eee46271cbe60ee8a49d0ca657f6e92e174e_0_0.fastq.gz (there will be many .fastq.gz files per barcode)
-│   ├── barcode02
-│   │   └── fastq_runid_fbc8eee46271cbe60ee8a49d0ca657f6e92e174e_0_0.fastq.gz
-│   ├── barcode03
-│   │   └── fastq_runid_fbc8eee46271cbe60ee8a49d0ca657f6e92e174e_0_0.fastq.gz
-│   ├── guppy-logs
-│       └── guppy_basecaller_log-2020-04-17_09-45-00.log (there will be many guppy-logs)
-│   ├── nanoplot
-│       └── NanoPlot-report.html # additionally all images and other files produced by NanoPlot
-│   ├── nanoplot-barcoded
-│       └── NanoPlot-report.html # additionally all images and other files produced by NanoPlot, but for each barcode
-│   ├── sequencing_summary.txt
-│   ├── sequencing_telemetry.js
-│   └── unclassified
-│       └── fastq_runid_fbc8eee46271cbe60ee8a49d0ca657f6e92e174e_0_0.fastq.gz
-└── log # qsub logs
-    └── guppy.log
-    └── nanoplot.log
+Prior to running stylo, make sure the INTIAL PARAMETERS are set accurately - the default settings are as follows:
+```java
+	//Initial parameters
+	reads = 'fastq_pass/**.fastq.gz'
+	sampleinfo = 'sampleinfo.txt'
+	outdir = 'stylo'
+	unicycler = false
 ```
 
-### Assembly with Flye and polishing with Racon and Medaka
-
-`workflow-after-gpu-basecalling.sh` - Assembly with Flye and polishing with Racon and Medaka
-
-#### Requirements
-  * Must have previously run the above workflow `run_basecall-w-gpu.sh`
-  * Must be logged into a server with the ability to `qsub` (Aspen, Monoliths 1-3).
-  * `OUTDIR` argument must be the same directory as the `OUTDIR` from the `run_basecall-w-gpu.sh` workflow
-
-#### This workflow does the following:
-  * Takes in 1 argument:
-    1. `$outdir` - The output directory from running `run_basecall-w-gpu.sh`, which contain `demux/barcodeXX/` subdirectories
-  * Prepares a barcoded sample - concatenates all fastq files into one, compresses, and counts read lengths
-  * Runs `filtlong` to remove reads <500bp and downsample reads to 600 Mb (roughly 120X for a 5 Mb genome)
-  * Assembles downsampled/filtered reads using `flye` (`--plasmids` and `-g 5M` options used)
-  * Polishes flye draft assembly using racon 4 times
-  * Polishes racon polished assembly using Medaka (specific to r9.4.1 flowcell, high accuracy basecaller model, and guppy version 3.6.x, `--m r941_min_high_g360` option used)
-  * Final, polished assembly for each barcode can be found in each barcode subdirectory `demux/barcodeXX/final.asm.barcodeXX.fasta`
-
-#### USAGE
-Pull up help/usage statement by running `workflow-after-gpu-basecalling.sh` or `workflow-after-gpu-basecalling.sh -h`
+`reads`: Stylo will look for any and all fastq.gz files under a directory and assume _each_ one is a unique sample. Prior to running stylo, you should concatenate, rename, and compress (if they're not already) your reads. Anything prior to the file extension will be used as the Sample ID. For example:
 ```bash
-# note: ensure that the outdir supplied in this command is the exact same as the outdir you
-# supplied when you ran the run_basecall-w-gpu.sh script
-Usage: /path/to/nanoporeWorkflow-0.5.0/workflows/workflow-after-gpu-basecalling.sh outdir/
-
-This workflow runs the following on barcodes 01-24:
-
-filtlong     removes reads <500bp and downsamples to 600Mb (roughly 120X for 5Mb genome)
-flye         assembles reads. --plasmids and -g 5M options used
-racon        polishes 4X with Racon
-medaka       polishes once with Medaka using r9.4.1 pore and HAC guppy basecaller profile
-
-# EXAMPLE OUTPUT - only showing one barcode for brevity
-$OUTDIR/
-├── demux
-│   ├── barcode01
-│   │   ├── all.fastq.gz
-│   │   ├── flye
-|   |   ├── final.asm.barcodeXX.fasta
-│   │   ├── log  # qsub logs for each barcode
-│   │   │   ├── assemble-d64ffbc5-4012-44c5-8191-1a57d4a7d15c.log
-│   │   │   ├── polish-medaka-00e52c16-0bd3-460d-b955-3a532be958b1.log
-│   │   │   ├── polish-racon-d7ebc124-d100-43e0-b347-1e60bbc0bf18.log
-│   │   │   └── prepSample-7ecc6f51-4937-40d1-a6bd-d83e66078984.log
-│   │   ├── medaka
-│   │   ├── racon
-│   │   ├── readlengths.txt.gz
-│   │   └── reads.minlen1000.600Mb.fastq.gz
-│   ├── guppy-logs
-│   ├── nanoplot
-│   ├── nanoplot-barcoded
-│   ├── sequencing_summary.txt
-│   ├── sequencing_telemetry.js
-│   └── unclassified
-└── log # qsub logs
-    └── guppy.log
-    └── nanoplot.log
+fastq_pass/
+├── 01_2014C-3598
+│   └── 01_2014C-3598_all.fastq.gz
+├── 02_2014C-3599
+│   └── 02_2014C-3599_all.fastq.gz
+├── 03_2014C-3857
+│   └── 03_2014C-3857_all.fastq.gz
 ```
-#### Notes on assembly and polishing workflow
-  * It will check for the following files, to determine if it should skip any of the steps. Helps if one part doesn't run correctly and you don't want to repeat a certain step, e.g. re-assembling.
-    * `np_filter_filtlong.sh` looks for `./demux/barcodeXX/reads.minlen500.600Mb.fastq.gz` 
-    * `np_assemble_flye.sh` looks for `./demux/barcodeXX/flye/assembly.fasta`
-    * `np_consensus_racon.sh` looks for `./demux/barcodeXX/racon/ctg.consensus.iteration4.fasta`
-    * `np_polish_medaka.sh` looks for `./demux/barcodeXX/medaka/consensus.fasta`
 
-## Contributing
-If you are interested in contributing to nanoporeWorkflow, please take a look at the [contribution guidelines](CONTRIBUTING.md). We welcome issues or pull requests!
+`sampleinfo`: Tab-delimited text file with sample information. For example:
+```bash
+BARCODE WGSID   GENUS   SPECIES
+barcode01       01_2014C-3598_all    Salmonella      enterica
+barcode02       02_2014C-3599_all    Salmonella      enterica
+barcode03       03_2014C-3857_all    Salmonella      enterica
+```
+* Barcode: Standard barcode output from MinKNOW e.g. barcode01-barcode96
+* WGSID: Sample ID. **Must match filename of concatenated reads**.
+* GENUS: Sample genus, used in SOCRU
+* SPECIES: Sample species, used in SOCRU
 
-## Future plans 
-* Add support for passing in a config file to `workflow-after-gpu-basecalling.sh` that contains:
-  * Sample ID
-  * barcode number (RBK or NBD)
-  * estimated genome size (to be used as input parameter in various places)
-* Allow users to specify a read length for removing reads w/ `filtlong`
-* Test and add support for `rasusa` for randomly subsampling and filtering reads (`filtlong` is biased towards reads with highest q-scores)
-* add flags/options for other sequencing kits, barcoding kits, flowcells (direct RNAseq?)
-  * **R10.3** + ligation with native barcodes 1-24 (R10 flowcell discontinued)
-  
+`outdir`: Name of Stylo output directory. Default name is set to `stylo`.
+`unicycler`: Option to use Unicycler instead of Flye as the assembler. Default is set to `false`.
+
+You can see how parameters are used in the next section **Usage**.
+
+NOTE: Support for hybrid assemblies using short-reads hasn't been added yet. This option was added as an experiment to test how well k-mer based assemblers perform with ONT's v14/r10.4.1 chemistry.
+
+#### Processes:
+Directives for each process can be changed in `stylo.config` under the second bracketed section `process`. This is where you can update the containers used in each process. Check out [Resources](#resources) to see a full list of all the containers and the tools' githubs.
+
+#### Profiles:
+Configuration settings for each profile can be changed in `stylo.config` under the third bracketed section `profiles`. This is where you can update or create profiles that will dictate where and how each process is run. By default, there are two main profiles and three auxiliary profiles:
+
+* `standard`: Will execute stylo using the 'local' executor, running processes on the computer where Nextflow is launched. 
+* `sge`: Will execute stylo using a Sun Grid Engine cluster, running processes on the HPC (qsub).
+* `short`: Auxiliary profile to change the sge default queue to short queue
+* `gpu`: Auxiliary profile to chage the sge default queue to gpu queue
+* `highmem`: Auxiliary profile to change the sge default queue to highmem queue
+
+You can see how profiles are used in the next section **Usage**.
+
+NOTE: The default profile settings were mostly pulled from recommendations made by CDC Scicomp in their Nextflow training called 'Reproducible, scalable, and shareable analysis workflows with Nextflow'. There is a good chance you will have to create/modify your own profile to run stylo using your institution's computing environment. Check out [Resources](#resources) to learn more about creating profiles.
+
+#### Usage
+Once you've made the necessary changes to the configuration file to run the workflow on your computing environment and have set up inital parameters, you can run stylo just as you would any nextflow workflow:
+```bash
+nextflow run /path/to/nanoporeWorkflow/schtappe/stylo.nf -c /path/to/nanoporeWorkflow/config/stylo.config
+```
+Nextflow is picky about single-hyphen flags vs. double-hyphen flags. Single-hyphens affect the nextflow command while double-hyphens affect the parameters in the configuration file. For example, to change the initial parameters without directly editing `stylo.config`:
+```bash
+nextflow run /path/to/nanoporeWorkflow/schtappe/stylo.nf -c /path/to/nanoporeWorkflow/config/stylo.config \
+  --reads path/to/your/reads/**.fastq.gz \
+  --sampleinfo yoursampleinfofile.txt \
+  --outdir youroutputdirectory \
+  --unicycler true
+```
+
+By default, nextflow will run locally. If you want to specify a profile, use the `-profile` flag. For example, to qsub stylo's processes:
+```bash
+nextflow run /.../nanoporeWorkflow/schtappe/stylo.nf -c /.../nanoporeWorkflow/config/stylo.config -profile sge
+```
+
+You can change the queue by adding the auxiliary profile name, separated by a comma:
+```bash
+nextflow run /.../nanoporeWorkflow/schtappe/stylo.nf -c /.../nanoporeWorkflow/config/stylo.config -profile sge,highmem
+```
+Run `nextflow help` or `nextflow run -help` for more information on nextflow flags.
+
+NOTE: Nextflow applies the same parameters to each sample being processed. This means you'll want to run stylo on read sets all of the same organism or at least the same genome size and all have been generated using the same chemistry and guppy basecaller version (affects flye_read_type and medaka_model) This could change in the future by adding more fields to the sampleinfo sheet, but for now it is what it is.
+
+#### Output
+Here's what stylo output looks like per sample(directories only):
+```bash
+stylo/
+└── PNUSAS002131
+    ├── busco
+    │   ├── auto_lineage
+    │   │   ├── run_archaea_odb10
+    │   │   │   ├── busco_sequences
+    │   │   │   │   ├── fragmented_busco_sequences
+    │   │   │   │   ├── multi_copy_busco_sequences
+    │   │   │   │   └── single_copy_busco_sequences
+    │   │   │   └── hmmer_output
+    │   │   └── run_bacteria_odb10
+    │   │       ├── busco_sequences
+    │   │       │   ├── fragmented_busco_sequences
+    │   │       │   ├── multi_copy_busco_sequences
+    │   │       │   └── single_copy_busco_sequences
+    │   │       ├── hmmer_output
+    │   │       └── placement_files
+    │   ├── logs
+    │   ├── prodigal_output
+    │   │   └── predicted_genes
+    │   │       └── tmp
+    │   ├── run_bacteria_odb10
+    │   │   ├── busco_sequences
+    │   │   │   ├── fragmented_busco_sequences
+    │   │   │   ├── multi_copy_busco_sequences
+    │   │   │   └── single_copy_busco_sequences
+    │   │   ├── hmmer_output
+    │   │   └── placement_files
+    │   └── run_enterobacterales_odb10
+    │       ├── busco_sequences
+    │       │   ├── fragmented_busco_sequences
+    │       │   ├── multi_copy_busco_sequences
+    │       │   └── single_copy_busco_sequences
+    │       └── hmmer_output
+    ├── flye
+    │   ├── 00-assembly
+    │   ├── 10-consensus
+    │   ├── 20-repeat
+    │   ├── 30-contigger
+    │   └── 40-polishing
+    ├── medaka
+    ├── reads
+    ├── socru
+    ├── staramr_assembly
+    │   └── hits
+    └── staramr_reads
+        └── hits
+```
+
+## Future plans
+Small bug/typo/formatting issues aside, updates to stylo will likely include: 
+* Support for short-reads to run through Unicycler
+* More param options for each process (ideally I guess all of them?)
+* A barcode renaming script that will handle the read concatenating necessary to run the workflow
+* Test set of sample data
+
+Workflows in development:
+* Messer: Plasmid-recovery workflow to individually fix and assemble plasmid contigs
+* Geteilt: Assembly-based antibiotic-resistance screening workflow
+
 ## Resources
+### Containers:
+* Nanoq:
+  * https://hub.docker.com/r/jimmyliu1326/nanoq
+  * https://github.com/esteinig/nanoq
+* Rasusa: 
+  * https://hub.docker.com/r/staphb/rasusa
+  * https://github.com/mbhall88/rasusa
+* Flye: 
+  * https://hub.docker.com/r/staphb/flye
   * https://github.com/fenderglass/Flye
-  * https://github.com/isovic/racon
+* Unicycler: 
+  * https://hub.docker.com/r/staphb/unicycler
+  * https://github.com/rrwick/Unicycler
+* Circlator: 
+  * https://hub.docker.com/r/staphb/circlator
+  * https://github.com/sanger-pathogens/circlator
+* Medaka: 
+  * https://hub.docker.com/r/ontresearch/medaka
   * https://github.com/nanoporetech/medaka
-  * https://github.com/nanoporetech/qcat
-  * How to set Guppy parameters (requires Nanopore Community login credentials) https://community.nanoporetech.com/protocols/Guppy-protocol/v/gpb_2003_v1_revl_14dec2018/how-to-configure-guppy-parameters
+* Seqtk: 
+  * https://hub.docker.com/r/staphb/seqtk
+  * https://github.com/lh3/seqtk
+* Staramr:
+  * https://hub.docker.com/r/staphb/staramr
+  * https://github.com/phac-nml/staramr
+* Socru:
+  * https://hub.docker.com/r/quadraminstitute/socru
+  * https://github.com/quadram-institute-bioscience/socru 
+* BUSCO:
+  * https://hub.docker.com/r/ezlabgva/busco
+  * https://busco.ezlab.org/
+
+### Nextflow:
+If you're unfamiliar with Nextflow or would like to just learn more, consider doing these free trainings found here: https://training.nextflow.io/
+The Nextflow documentation is super helpful as well, especially to learn more about what process directives and profile configurations you can include in your local copy of `stylo.config`. An entire section is dedicated to just containers which should help troubleshoot any issues with Singularity or assist in using Docker instead. Nextflow documentation can be found here: https://www.nextflow.io/docs/latest/index.html
+
+If you're a CDC user, you should register for Scicomp's Nextflow tutorials here: https://info.biotech.cdc.gov/info/training-portal-updated-tracks/
+Or you can access the material directly here: https://training.biotech.cdc.gov/nextflow/
+
+## Thanks
+Special thanks to: 
+* Jess Chen, Lee Katz, and Curtis Kapsak for their enthusiastic guidance and wealth of data science expertise
+* Kaitlin Tagg and Hattie Webb for their encouragement and passion for plasmids that started this whole venture
+* StaPH-B who are an indispensable resource for bioinformatics in public health
+* Seqera whose workshop is a fantastic introduction to writing in Nextflow
+* OpenAI - ChatGPT is an amazing tool for looking up documentation, especially when you're a bad coder
+
+## Etymology
+The names 'Schtappe', 'Stylo', 'Messer', and 'Geteilt' are all spells from a wonderful book series called Ascendance of a Bookworm by Miya Kazuki. Obviously, they're all German words. The meaning of the spells all somewhat capture their respective purposes. 
