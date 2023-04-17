@@ -87,7 +87,7 @@ barcode01       01_2014C-3598_all    Salmonella      enterica
 barcode02       02_2014C-3599_all    Salmonella      enterica
 barcode03       03_2014C-3857_all    Salmonella      enterica
 ```
-* Barcode: Standard barcode output from MinKNOW e.g. barcode01-barcode96
+* BARCODE: Standard barcode output from MinKNOW e.g. barcode01-barcode96
 * WGSID: Sample ID. **Must match filename of concatenated reads**.
 * GENUS: Sample genus, used in SOCRU
 * SPECIES: Sample species, used in SOCRU
