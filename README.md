@@ -60,7 +60,7 @@ As of 4/17/2023, this workflow was developed on Nextflow version 22.10.6.
 #### Parameters:
 Parameters for each process can be changed in `stylo.config` under the first bracketed section `params`. Check out [Resources](#resources) for links to each process's main github page to learn more about process-specific parameters.
 
-Prior to running stylo, make sure the INTIAL PARAMETERS are set accurately - the default settings are as follows:
+Prior to running stylo, make sure the INITIAL PARAMETERS are set accurately - the default settings are as follows:
 ```java
 	//Initial parameters
 	reads = 'fastq_pass/**.fastq.gz'
