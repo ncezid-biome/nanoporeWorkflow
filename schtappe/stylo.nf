@@ -10,6 +10,7 @@ PROCESSES
 process READFILTERING {
 	tag "Nanoq on $sample_id"
 	publishDir "${params.outdir}/${sample_id}/reads/", mode: 'copy'
+	errorStrategy = 'ignore'
 	
 	input:
 	tuple val(sample_id), path(reads)
@@ -34,6 +35,7 @@ process DOWNSAMPLE {
 					else null
 		}
 	)
+	errorStrategy = 'ignore'
 	
 	input:
 	tuple val(sample_id), path(reads)
@@ -57,6 +59,7 @@ process ASSEMBLE {
 					else null
 		}		
 	)
+	errorStrategy = 'ignore'
 	
 	input:
 	tuple val(sample_id), path(reads)
@@ -80,6 +83,7 @@ process HYBRID {
 					else null
 		}
 	)
+	errorStrategy = 'ignore'
 	
 	input:
 	tuple val(sample_id), path(reads)
@@ -103,6 +107,7 @@ process ROTATE {
 					else null
 		}		
 	)
+	errorStrategy = 'ignore'
 	
 	input:
 	tuple val(sample_id), path(assembly), path(reads)
@@ -118,6 +123,7 @@ process ROTATE {
 
 process POLISH {
 	tag "Medaka on $sample_id"
+	errorStrategy = 'ignore'
 	
 	input:
 	tuple val(sample_id), path(assembly), path(reads)
@@ -141,6 +147,7 @@ process RENAME {
 					else null
 		}
 	)
+	errorStrategy = 'ignore'
 	
 	input:
 	tuple val(sample_id), path(assembly), path(reads)
@@ -156,6 +163,7 @@ process RENAME {
 
 process FORMATREADS {
 	tag "Reformatting reads for $sample_id"
+	errorStrategy = 'ignore'
 	
 	input:
 	tuple val(sample_id), path(assembly), path(reads)
@@ -180,6 +188,7 @@ process PLASMIDCHECK {
 					else null
 		}
 	)
+	errorStrategy = 'ignore'
 	
 	input:
 	tuple val(sample_id), path(assembly), path(reads), path(reads_fasta)
@@ -206,6 +215,7 @@ process SOCRU {
 					else null
 		}
 	)
+	errorStrategy = 'ignore'
 	
 	input:
 	tuple val(sample_id), path(assembly), path(reads), val(genus), val(species)
@@ -226,7 +236,7 @@ process SOCRU {
 		"""
 		socru Escherichia_coli ${assembly} --output_file "${params.socru_output}.txt" --top_blast_hits "${params.socru_blastoutput}.txt"
 		"""
-	else if (genus == 'Campylobacter')
+	else if (genus == 'Campylobacter' && species == 'sp')
 		"""
 		socru Campylobacter_sp. ${assembly} --output_file "${params.socru_output}.txt" --top_blast_hits "${params.socru_blastoutput}.txt"
 		"""
@@ -242,7 +252,7 @@ process SOCRU {
 		"""
 		socru Campylobacter_sp. ${assembly} --output_file "${params.socru_output}.txt" --top_blast_hits "${params.socru_blastoutput}.txt"
 		"""
-	else if (genus == 'Vibrio')
+	else if (genus == 'Vibrio' && species == 'sp')
 		"""
 		socru Vibrio_sp. ${assembly} --output_file "${params.socru_output}.txt" --top_blast_hits "${params.socru_blastoutput}.txt"
 		"""
@@ -257,6 +267,10 @@ process SOCRU {
 	else if (genus == 'Yersiniae')
 		"""
 		socru Yersinia_enterocolitica ${assembly} --output_file "${params.socru_output}.txt" --top_blast_hits "${params.socru_blastoutput}.txt"
+		"""
+	else if (genus == 'Staphylococcus' && species == 'aureus')
+		"""
+		socru Staphylococcus_aureus ${assembly} --output_file "${params.socru_output}.txt" --top_blast_hits "${params.socru_blastoutput}.txt"
 		"""	
 }
 
@@ -270,6 +284,7 @@ process ASSEMBLYQC {
 					else null
 		}
 	)
+	errorStrategy = 'ignore'
 	
 	input:
 	tuple val(sample_id), path(assembly), path(reads), val(genus), val(species)
